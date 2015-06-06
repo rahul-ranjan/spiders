@@ -1,0 +1,92 @@
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from scrapy.contrib.spiders import CrawlSpider, Rule
+from scrapy.http import Request,FormRequest
+import json
+import time
+import functools
+import pickle
+import re
+import datetime
+import csv
+count = 0
+total_url = []
+class RedBusSpider(Spider):
+	name = "redbus"
+	allowed_domains = ["redbus.in"]
+	start_urls = ["http://www.redbus.in"]
+ 	
+	def parse(self, response):
+		sel = Selector(response)
+		fobj = open("route_url",'r')
+		urls=pickle.load(fobj)
+		fobj.close()
+		for url in urls:
+			try:	yield Request(str(url),functools.partial(self.bus_parse,url=str(url)))
+			except: print "Exception caught in"+str(url)
+
+	def bus_parse(self,response,url):
+		sel = Selector(response)
+		jsonresponse = json.loads(response.body_as_unicode())
+		#print jsonresponse
+		data = jsonresponse["data"]
+		if data:
+			for d in data:
+				ratings = -1
+				corporation_name = d["Tvs"]
+				bus_type = d["BsTp"]
+				departure = d["DpTm"]
+				dep_time=int(re.sub(r'\D',"",departure))
+				foo = datetime.datetime.fromtimestamp(dep_time/1000)
+				departure_date,departure_time = str(foo).split(" ")
+				hours1,minutes1,seconds1=departure_time.split(":")
+				departure_minutes=int(hours1)*60+int(minutes1)+int(seconds1)/60
+				arrival = d["ArTm"]
+				arr_time = int(re.sub(r'\D',"",arrival))
+				bar = datetime.datetime.fromtimestamp(arr_time/1000)
+				arrival_date,arrival_time = str(bar).split(" ")
+				hours2,minutes2,seconds2=arrival_time.split(":")
+				arrival_minutes=int(hours2)*60+int(minutes2)+int(seconds2)/60
+				try:
+					ratings = d["Rtg"]["totRt"]
+				except:
+					print "Ratings not available"
+				fare = ''.join(str(d["FrLst"])[1:-1]).replace(",","@")
+				duration = (bar-foo).total_seconds()
+				hours = int(duration/3600)
+				minutes = int((duration/60)%60)
+				total_duration = int(duration/60)
+				city1=''.join(re.findall(r'fromCityName=\w*',url)).replace("fromCityName=","")
+				city2=''.join(re.findall(r'toCityName=\w*',url)).replace("toCityName=","")
+				from_station = city1
+				to_station = city2
+				day_of_travel = "NNNNNNY"
+				boarding_stations=""
+				try:
+					boarding = d["BPLst"]
+					for b in boarding:
+						boarding_stations += b["Loc"].encode('ascii','ignore').replace(",","-").replace("\n","@").replace("/n","@").replace("\t","")
+						boarding_stations+="@"
+				except:
+					boarding_stations = city1
+				dropping_stations = ""
+				try:
+					dropping = d["DPLst"]
+					for x in dropping:
+						dropping_stations +=x["Loc"].encode('ascii','ignore').replace(",","-").replace("\n","@").replace("/n","@").replace("\t","")
+						dropping_stations+="@"
+				except:
+					dropping_stations = city2
+				parameters = url.replace("http://www.redbus.in/Booking/SearchResultsJSON.aspx","http://www.redbus.in/Booking/SelectBus.aspx")
+				parameters=parameters.split('&doj')[0]
+				parameters = re.sub(r"&\d+$","",parameters)
+				parameters += "&busType=Any&doj="
+				website = "www.redbus.in"
+				with open('redbus_saturday.csv', 'a') as fp:
+					a = csv.writer(fp, delimiter=',')
+					data = [[city1,city2,from_station,to_station,corporation_name,bus_type,departure_date,departure_minutes,arrival_date,arrival_minutes,day_of_travel,total_duration,ratings,fare,boarding_stations,dropping_stations,website,parameters]]
+					a.writerows(data)
+
+
+
+
